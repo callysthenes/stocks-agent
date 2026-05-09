@@ -16,6 +16,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Auth gate ─────────────────────────────────────────────────────────────────
+from dashboard.auth import require_login  # noqa: E402
+require_login()
+
 # Sidebar navigation header
 with st.sidebar:
     st.title("📈 StocksAgent")

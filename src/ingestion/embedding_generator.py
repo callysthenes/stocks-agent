@@ -32,6 +32,11 @@ def get_embedding_model() -> "SentenceTransformer":
             settings.embedding_model,
             device=settings.embedding_device,
             cache_folder="/app/.cache/sentence_transformers",
+            # transformers>=4.44 uses multiprocessing in from_pretrained when
+            # low_cpu_mem_usage=True (the default).  Celery ForkPoolWorker
+            # processes are daemon processes and cannot spawn children, so we
+            # must disable the multiprocessing-based weight loader.
+            model_kwargs={"low_cpu_mem_usage": False},
         )
         dim = _embed_model.get_sentence_embedding_dimension()
         logger.info(f"Embedding model loaded (dim={dim}, device={settings.embedding_device})")

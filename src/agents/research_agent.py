@@ -93,13 +93,38 @@ def research_node(state: AgentState) -> Command:
 
 
 def _extract_tickers_from_query(query: str) -> list[str]:
-    """Simple regex to extract likely ticker symbols from user query."""
-    # Match patterns like AAPL, SAN.MC, BTC-USD (2-6 uppercase letters with optional suffix)
-    pattern = r"\b([A-Z]{1,6}(?:\.[A-Z]{1,3})?(?:-[A-Z]{2,4})?)\b"
+    """
+    Extract likely ticker symbols from a user query.
+
+    For video-alert queries the caller embeds a structured section
+    "Tickers mencionados: <list|ninguno identificado>" — we parse that
+    section first so we don't accidentally match words from an ALL-CAPS
+    YouTube title.
+    """
+    # ── Parse structured ticker section if present ────────────────────────────
+    if "Tickers mencionados:" in query:
+        section = query.split("Tickers mencionados:", 1)[1].split(".")[0].strip()
+        if "ninguno" in section.lower():
+            return []
+        # Pull only the real ticker symbols from this section
+        pattern = r"\b([A-Z]{1,6}(?:\.[A-Z]{1,3})?(?:-[A-Z]{2,4})?)\b"
+        candidates = re.findall(pattern, section)
+        stop_words = {"CEO", "CFO", "ETF", "USA", "EUR", "USD", "AI", "OK",
+                      "AND", "OR", "NOT", "THE", "FOR", "WITH"}
+        return [c for c in candidates if c not in stop_words and len(c) >= 2]
+
+    # ── Fallback: regex extraction for free-form interactive queries ──────────
+    pattern = r"\b([A-Z]{2,5}(?:\.[A-Z]{1,3})?(?:-[A-Z]{2,4})?)\b"
     candidates = re.findall(pattern, query)
-    # Filter out common non-ticker uppercase words
-    stop_words = {"CEO", "CFO", "ETF", "USA", "EUR", "USD", "AI", "OK", "AND", "OR", "NOT"}
-    return [c for c in candidates if c not in stop_words and len(c) >= 2]
+    # Extended stop-word list to reduce false positives
+    stop_words = {
+        "CEO", "CFO", "ETF", "USA", "EUR", "USD", "AI", "OK", "AND", "OR",
+        "NOT", "THE", "FOR", "WITH", "FROM", "INTO", "OVER", "UNDER", "IRAN",
+        "WAR", "IS", "AT", "IN", "BY", "ON", "TO", "OF", "AS", "AN",
+        "EU", "UK", "UN", "NATO", "GDP", "IPO", "PE", "EPS", "ROE", "ROI",
+        "YTD", "YOY", "QOQ", "MOM", "ATH", "ATL", "HODL", "DCA",
+    }
+    return [c for c in candidates if c not in stop_words]
 
 
 def _synthesize_research(

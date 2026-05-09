@@ -13,6 +13,7 @@ from src.models import (
     AgentReport,
     Channel,
     ChannelAccuracy,
+    DimTicker,
     GroundTruth,
     Prediction,
     ReportType,
@@ -95,9 +96,7 @@ def update_video_status(
 def get_recent_videos(db: Session, limit: int = 20) -> list[Video]:
     return list(
         db.scalars(
-            select(Video)
-            .order_by(Video.created_at.desc())
-            .limit(limit)
+            select(Video).order_by(Video.created_at.desc()).limit(limit)
         )
     )
 
@@ -113,18 +112,30 @@ def save_transcript(
     language: str = "es",
     word_count: int | None = None,
 ) -> Transcript:
-    transcript = Transcript(
-        video_id=video_id,
-        language=language,
-        raw_text=raw_text,
-        cleaned_text=cleaned_text,
-        word_count=word_count,
-    )
-    db.add(transcript)
+    existing = db.execute(
+        select(Transcript).where(Transcript.video_id == video_id)
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.raw_text = raw_text
+        existing.language = language
+        if cleaned_text is not None:
+            existing.cleaned_text = cleaned_text
+        if word_count is not None:
+            existing.word_count = word_count
+        transcript = existing
+    else:
+        transcript = Transcript(
+            video_id=video_id,
+            language=language,
+            raw_text=raw_text,
+            cleaned_text=cleaned_text,
+            word_count=word_count,
+        )
+        db.add(transcript)
+
     db.execute(
-        update(Video)
-        .where(Video.id == video_id)
-        .values(transcript_source=source)
+        update(Video).where(Video.id == video_id).values(transcript_source=source)
     )
     db.flush()
     return transcript
@@ -138,6 +149,52 @@ def update_transcript_chunks(db: Session, video_id: str, chunk_count: int) -> No
     )
 
 
+# ── DimTicker operations ──────────────────────────────────────────────────────
+
+def upsert_dim_ticker(db: Session, ticker_data: dict[str, Any]) -> DimTicker:
+    """
+    Insert or update a ticker in the dim_tickers dimension table.
+    Keyed on ticker_symbol (unique). Returns the DimTicker row.
+    """
+    symbol = ticker_data.get("ticker_symbol", "").upper().strip()
+    if not symbol:
+        raise ValueError("ticker_symbol is required")
+
+    existing = db.scalar(select(DimTicker).where(DimTicker.ticker_symbol == symbol))
+    if existing:
+        # Update enrichment fields if new info is provided
+        if ticker_data.get("company_name") and not existing.company_name:
+            existing.company_name = ticker_data["company_name"]
+        if ticker_data.get("exchange") and not existing.exchange:
+            existing.exchange = ticker_data["exchange"]
+        if ticker_data.get("sector") and not existing.sector:
+            existing.sector = ticker_data["sector"]
+        if ticker_data.get("industry") and not existing.industry:
+            existing.industry = ticker_data["industry"]
+        if ticker_data.get("currency") and not existing.currency:
+            existing.currency = ticker_data["currency"]
+        if ticker_data.get("country") and not existing.country:
+            existing.country = ticker_data["country"]
+        db.flush()
+        return existing
+
+    dim = DimTicker(
+        ticker_symbol=symbol,
+        company_name=ticker_data.get("company_name"),
+        exchange=ticker_data.get("exchange"),
+        sector=ticker_data.get("sector"),
+        industry=ticker_data.get("industry"),
+        currency=ticker_data.get("currency"),
+        country=ticker_data.get("country"),
+        is_index=bool(ticker_data.get("is_index", False)),
+        is_etf=bool(ticker_data.get("is_etf", False)),
+        is_crypto=bool(ticker_data.get("is_crypto", False)),
+    )
+    db.add(dim)
+    db.flush()
+    return dim
+
+
 # ── Ticker mention operations ─────────────────────────────────────────────────
 
 def save_ticker_mentions(
@@ -145,12 +202,25 @@ def save_ticker_mentions(
 ) -> list[TickerMention]:
     objects = []
     for m in mentions:
+        symbol = m.get("ticker_symbol", "").upper().strip()
+        if not symbol:
+            continue
+
+        # Upsert the dimension row first
+        try:
+            dim = upsert_dim_ticker(db, m)
+            dim_ticker_id = dim.id
+        except Exception:
+            dim_ticker_id = None
+
         obj = TickerMention(
             video_id=video_id,
-            ticker_symbol=m.get("ticker_symbol", "").upper(),
+            dim_ticker_id=dim_ticker_id,
+            ticker_symbol=symbol,
             company_name=m.get("company_name"),
             exchange=m.get("exchange"),
             sentiment=m.get("sentiment", "neutral"),
+            mention_count=max(1, int(m.get("mention_count", 1))),
             context_snippet=m.get("context_snippet"),
             confidence=m.get("confidence"),
         )
@@ -185,18 +255,40 @@ def save_predictions(
     objects = []
     today = date.today().isoformat()
     for p in predictions:
-        ticker = p.get("ticker_symbol", "").upper()
+        ticker = p.get("ticker_symbol", "").upper().strip()
+        if not ticker:
+            continue
+
+        # Validate enums — fall back to safe defaults
+        pred_type = p.get("prediction_type", "watch")
+        if pred_type not in ("buy", "sell", "hold", "watch"):
+            pred_type = "watch"
+
+        pred_dir = p.get("predicted_direction", "neutral")
+        if pred_dir not in ("up", "down", "neutral"):
+            pred_dir = "neutral"
+
+        rec = p.get("recommendation")
+        if rec not in ("buy", "accumulate", "hold", "reduce", "sell", "avoid", None):
+            rec = None
+
         obj = Prediction(
             video_id=video_id,
             channel_id=channel_id,
             ticker_symbol=ticker,
-            prediction_type=p.get("prediction_type", "watch"),
-            predicted_direction=p.get("predicted_direction", "neutral"),
+            prediction_type=pred_type,
+            recommendation=rec,
+            predicted_direction=pred_dir,
+            is_long_term=p.get("is_long_term"),
+            price_at_prediction=p.get("price_at_prediction") or price_lookup.get(ticker),
+            entry_price=p.get("entry_price"),
             target_price=p.get("target_price"),
+            stop_loss=p.get("stop_loss"),
             timeframe_days=p.get("timeframe_days"),
-            price_at_prediction=price_lookup.get(ticker),
-            prediction_date=today,
+            confidence_score=p.get("confidence_score"),
+            analyst_reasoning=p.get("analyst_reasoning"),
             context_snippet=p.get("context_snippet"),
+            prediction_date=today,
         )
         db.add(obj)
         objects.append(obj)
@@ -205,7 +297,6 @@ def save_predictions(
 
 
 def get_pending_predictions(db: Session) -> list[Prediction]:
-    """Get predictions not yet evaluated whose timeframe may have elapsed."""
     return list(
         db.scalars(
             select(Prediction)
@@ -242,7 +333,6 @@ def save_ground_truth(
 
 
 def refresh_channel_accuracy(db: Session, channel_id: str) -> None:
-    """Recalculate and upsert channel accuracy summary."""
     total = db.scalar(
         select(func.count(Prediction.id))
         .where(Prediction.channel_id == channel_id, Prediction.is_evaluated == True)  # noqa: E712
@@ -281,6 +371,8 @@ def save_report(
     content_markdown: str,
     tickers_analyzed: list[str] | None = None,
     video_id: str | None = None,
+    channel_id: str | None = None,
+    telegram_chat_id: str | None = None,
 ) -> AgentReport:
     report = AgentReport(
         report_type=report_type,
@@ -288,6 +380,8 @@ def save_report(
         content_markdown=content_markdown,
         tickers_analyzed=tickers_analyzed,
         video_id=video_id,
+        channel_id=channel_id,
+        telegram_chat_id=telegram_chat_id,
     )
     db.add(report)
     db.flush()

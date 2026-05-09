@@ -1,7 +1,7 @@
 """
 Metadata extractor — uses DeepSeek V3 (JSON mode) to extract:
   - Ticker mentions with sentiment from transcript text
-  - Explicit buy/sell/hold predictions
+  - Explicit buy/sell/hold predictions with price levels and reasoning
 """
 import json
 import re
@@ -34,39 +34,53 @@ Responde SIEMPRE en formato JSON válido y NADA MÁS. No incluyas explicaciones 
 
 _TICKER_EXTRACTION_PROMPT = """Analiza la siguiente transcripción de un vídeo de inversión en bolsa en español y extrae TODOS los activos financieros mencionados (acciones, ETFs, índices, criptomonedas).
 
-Para cada uno devuelve:
-- ticker_symbol: símbolo bursátil (ej: AAPL, SAN.MC, MSFT, BTC-USD). Si no sabes el ticker exacto, inferlo del nombre de la empresa.
+Para cada uno devuelve un objeto con EXACTAMENTE estos campos:
+- ticker_symbol: símbolo bursátil (ej: AAPL, SAN.MC, MSFT, BTC-USD, ^IBEX). Si no conoces el ticker exacto, infierelo del nombre.
 - company_name: nombre completo de la empresa o activo
-- exchange: mercado (NYSE, NASDAQ, BME, LSE, EURONEXT, CRYPTO, etc.)
+- exchange: mercado (NYSE, NASDAQ, BME, LSE, EURONEXT, XETRA, CRYPTO, INDEX, etc.)
+- sector: sector empresarial (Technology, Financials, Energy, Healthcare, etc.) o null si no aplica
+- currency: divisa principal (EUR, USD, GBP, etc.) o null si no sabes
+- country: país de origen (Spain, USA, Germany, etc.) o null
+- is_index: true si es un índice (IBEX35, S&P500, etc.), false en caso contrario
+- is_etf: true si es un ETF, false en caso contrario
+- is_crypto: true si es criptomoneda, false en caso contrario
 - sentiment: sentimiento del presentador → "bullish", "bearish" o "neutral"
-- context_snippet: fragmento de texto donde se menciona (máx 200 caracteres)
-- confidence: confianza 0.0-1.0 en la extracción
+- mention_count: número aproximado de veces que se menciona en el fragmento (entero ≥ 1)
+- context_snippet: fragmento donde se menciona con mayor detalle (máx 200 caracteres)
+- confidence: confianza 0.0-1.0 en la extracción del ticker
 
 Transcripción:
 {transcript}
 
 Responde SOLO con un JSON array. Si no hay tickers, devuelve [].
 Ejemplo:
-[{{"ticker_symbol": "SAN.MC", "company_name": "Banco Santander", "exchange": "BME", "sentiment": "bullish", "context_snippet": "Santander me parece una empresa muy sólida...", "confidence": 0.9}}]"""
+[{{"ticker_symbol": "SAN.MC", "company_name": "Banco Santander", "exchange": "BME", "sector": "Financials", "currency": "EUR", "country": "Spain", "is_index": false, "is_etf": false, "is_crypto": false, "sentiment": "bullish", "mention_count": 3, "context_snippet": "Santander me parece una empresa muy sólida...", "confidence": 0.9}}]"""
 
 _PREDICTION_EXTRACTION_PROMPT = """De la siguiente transcripción, extrae ÚNICAMENTE las predicciones o recomendaciones EXPLÍCITAS que hace el presentador sobre los activos: {tickers}.
 
-Una predicción explícita es cuando el presentador dice claramente que compraría, vendería, o que espera que el precio suba/baje.
+Una predicción explícita es cuando el presentador dice claramente que compraría, vendería, acumularía, o que espera que el precio suba/baje/se mantenga.
 
-Para cada predicción devuelve:
-- ticker_symbol: símbolo del activo
+Para cada predicción devuelve un objeto con EXACTAMENTE estos campos:
+- ticker_symbol: símbolo del activo (de la lista proporcionada)
 - prediction_type: "buy", "sell", "hold" o "watch"
+- recommendation: recomendación granular → "buy", "accumulate", "hold", "reduce", "sell" o "avoid"
 - predicted_direction: "up", "down" o "neutral"
-- target_price: precio objetivo numérico o null
-- timeframe_days: horizonte temporal en días o null (ej: "en 6 meses" → 180)
-- context_snippet: cita exacta del presentador (máx 300 caracteres)
+- is_long_term: true si el horizonte es > 6 meses o el presentador habla de largo plazo, false en caso contrario
+- price_at_prediction: precio actual del activo mencionado en el vídeo o null
+- entry_price: precio de entrada recomendado por el presentador o null
+- target_price: precio objetivo mencionado o null
+- stop_loss: nivel de stop loss mencionado o null
+- timeframe_days: horizonte temporal en días (ej: "en 6 meses" → 180, "a largo plazo" → 365) o null
+- confidence_score: confianza 0.0-1.0 del presentador en su predicción según el contexto
+- analyst_reasoning: razón principal de la recomendación en ≤ 200 caracteres
+- context_snippet: cita literal del presentador (máx 300 caracteres)
 
 Transcripción:
 {transcript}
 
 Responde SOLO con un JSON array. Si no hay predicciones explícitas, devuelve [].
 Ejemplo:
-[{{"ticker_symbol": "AAPL", "prediction_type": "buy", "predicted_direction": "up", "target_price": 200.0, "timeframe_days": 90, "context_snippet": "Yo compraría Apple por debajo de 180..."}}]"""
+[{{"ticker_symbol": "AAPL", "prediction_type": "buy", "recommendation": "accumulate", "predicted_direction": "up", "is_long_term": false, "price_at_prediction": 175.0, "entry_price": 170.0, "target_price": 200.0, "stop_loss": 160.0, "timeframe_days": 90, "confidence_score": 0.8, "analyst_reasoning": "Corrección técnica a soporte clave con catalizadores macro favorables", "context_snippet": "Yo compraría Apple por debajo de 170 con objetivo en 200..."}}]"""
 
 
 # ── Extractor class ───────────────────────────────────────────────────────────
@@ -83,13 +97,8 @@ class MetadataExtractor:
         reraise=True,
     )
     def extract_tickers(self, transcript: str) -> list[dict[str, Any]]:
-        """
-        Extract ticker mentions with sentiment from a transcript.
-        Splits long transcripts into segments to stay within token limits.
-        """
-        # Use first 6000 words to stay within context window
+        """Extract ticker mentions with sentiment and metadata from a transcript."""
         truncated = " ".join(transcript.split()[:6000])
-
         messages = [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=_TICKER_EXTRACTION_PROMPT.format(transcript=truncated)),
@@ -109,17 +118,13 @@ class MetadataExtractor:
     def extract_predictions(
         self, transcript: str, tickers: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """
-        Extract explicit predictions for the given tickers.
-        """
+        """Extract explicit predictions with price levels and reasoning."""
         if not tickers:
             return []
-
         ticker_list = ", ".join(
             t["ticker_symbol"] for t in tickers if t.get("ticker_symbol")
         )
         truncated = " ".join(transcript.split()[:6000])
-
         messages = [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(
@@ -139,18 +144,13 @@ class MetadataExtractor:
     def _parse_json_list(content: str) -> list[dict[str, Any]]:
         """Parse JSON array from LLM response, handling markdown code blocks."""
         content = content.strip()
-
-        # Strip markdown code block if present
         if "```json" in content:
             content = content.split("```json", 1)[1].split("```", 1)[0].strip()
         elif "```" in content:
             content = content.split("```", 1)[1].split("```", 1)[0].strip()
-
-        # Find the first JSON array in the response
         match = re.search(r"\[.*\]", content, re.DOTALL)
         if match:
             content = match.group()
-
         try:
             parsed = json.loads(content)
             if isinstance(parsed, list):

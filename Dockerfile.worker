@@ -7,42 +7,62 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
     CUDA_VISIBLE_DEVICES=0
 
-# Install Python 3.11 and system deps
+# Install Python 3.12 from deadsnakes PPA and system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-dev \
-    python3-pip \
-    python3.11-venv \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
     ffmpeg \
     curl \
     build-essential \
     git \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf python3.11 /usr/bin/python \
-    && ln -sf python3.11 /usr/bin/python3
+    && ln -sf /usr/bin/python3.12 /usr/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3
+
+# Bootstrap pip for Python 3.12
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
 
 # Install uv
-RUN pip install uv==0.5.11
+RUN python3.12 -m pip install uv==0.5.11
 
 WORKDIR /app
 
 # Install PyTorch with CUDA 12.4 support FIRST
 # (must precede sentence-transformers and faster-whisper)
-RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+RUN python3.12 -m pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
     --index-url https://download.pytorch.org/whl/cu124
 
 # Install CTranslate2 with CUDA (required by faster-whisper)
-RUN pip install ctranslate2>=4.4.0
+RUN python3.12 -m pip install "ctranslate2>=4.4.0"
 
 # Install GPU-specific ML libraries
-RUN pip install \
-    faster-whisper>=1.1.0 \
-    sentence-transformers>=3.3.1 \
-    tokenizers>=0.20.0
+# Pin transformers<4.50 to avoid:
+#   1. moe.py `from __future__ import annotations` breaking torch 2.4 custom_op
+#   2. transformers 5.x torch.load restriction (requires torch>=2.6)
+RUN python3.12 -m pip install \
+    "faster-whisper>=1.1.0" \
+    "sentence-transformers==3.3.1" \
+    "transformers==4.47.1" \
+    "tokenizers>=0.20.0"
+
+# moe.py patch no longer needed with transformers==4.47.1 (file didn't exist yet)
+
+# Install CTranslate2 with CUDA (required by faster-whisper)
+RUN python3.12 -m pip install "ctranslate2>=4.4.0"
+
+# Install GPU-specific ML libraries
+RUN python3.12 -m pip install \
+    "faster-whisper>=1.1.0" \
+    "sentence-transformers>=3.3.1" \
+    "tokenizers>=0.20.0"
 
 # Install all other app dependencies (no GPU extras, torch already installed)
 COPY pyproject.toml .
-RUN uv pip install --system --no-cache \
+RUN uv pip install --system --python python3.12 --no-cache \
     "fastapi>=0.115.0" \
     "uvicorn[standard]>=0.32.0" \
     "pydantic>=2.9.0" \
@@ -51,6 +71,7 @@ RUN uv pip install --system --no-cache \
     "sqlalchemy>=2.0.36" \
     "alembic>=1.14.0" \
     "pymysql>=1.1.1" \
+    "aiomysql>=0.2.0" \
     "cryptography>=43.0.3" \
     "celery[redis]>=5.4.0" \
     "redis>=5.2.1" \

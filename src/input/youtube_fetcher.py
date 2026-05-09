@@ -73,25 +73,33 @@ class YouTubeFetcher:
             **self._base_opts,
             "playlistend": limit,
         }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                result = ydl.extract_info(f"{channel_url}/videos", download=False)
+        # Some channels have no /videos tab (streams-only, etc.) — try tabs in order.
+        tabs_to_try = ["/videos", "/streams", ""]
+        for tab in tabs_to_try:
+            url = f"{channel_url}{tab}"
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    result = ydl.extract_info(url, download=False)
                 if not result or "entries" not in result:
-                    return []
+                    continue
+                entries = [e for e in result["entries"] if e]
+                if not entries:
+                    continue
                 videos = []
-                for entry in result["entries"]:
-                    if not entry:
-                        continue
+                for entry in entries:
                     video_id = entry.get("id") or entry.get("url", "").split("v=")[-1]
                     if not video_id:
                         continue
-                    videos.append(
-                        self._normalize_video_entry(entry, channel_url)
-                    )
-                return videos
-        except Exception as e:
-            logger.error(f"Failed to list videos for {channel_url}: {e}")
-            return []
+                    videos.append(self._normalize_video_entry(entry, channel_url))
+                if videos:
+                    if tab != "/videos":
+                        logger.info(f"Channel {channel_url}: used tab '{tab or '(root)'}' to find {len(videos)} videos")
+                    return videos
+            except Exception as e:
+                logger.warning(f"Channel {channel_url} tab '{tab}' failed: {e}")
+                continue
+        logger.error(f"No videos found for {channel_url} across all tabs")
+        return []
 
     async def get_new_videos_since(
         self, channel_url: str, since_iso: str, max_check: int = 20

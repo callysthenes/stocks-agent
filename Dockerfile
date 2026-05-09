@@ -1,5 +1,5 @@
 # ── Base stage ────────────────────────────────────────────────────────────────
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -27,6 +27,7 @@ RUN uv pip install --system --no-cache \
     "sqlalchemy>=2.0.36" \
     "alembic>=1.14.0" \
     "pymysql>=1.1.1" \
+    "aiomysql>=0.2.0" \
     "cryptography>=43.0.3" \
     "celery[redis]>=5.4.0" \
     "redis>=5.2.1" \
@@ -58,6 +59,7 @@ RUN uv pip install --system --no-cache \
 COPY src/ ./src/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
+COPY scripts/ ./scripts/
 
 # ── API stage ─────────────────────────────────────────────────────────────────
 FROM base AS api

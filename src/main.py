@@ -19,9 +19,7 @@ from src.config import settings
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifecycle."""
     logger.info(f"Starting StocksAgent API [{settings.environment}]")
-    # Initialize DB tables on startup (idempotent)
-    from src.storage.mariadb_client import init_db
-    await init_db()
+    # DB schema is managed exclusively by Alembic migrations — no create_all() here.
     yield
     logger.info("Shutting down StocksAgent API")
 

@@ -7,10 +7,17 @@ from typing import TYPE_CHECKING
 
 import chromadb
 from llama_index.core import Settings, VectorStoreIndex
-from llama_index.core.llms import LLM
 from llama_index.llms.openai import OpenAI as LlamaOpenAI
+from llama_index.llms.openai import utils as _openai_utils
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from loguru import logger
+
+# LlamaIndex validates model names against OpenAI's catalogue.
+# Register DeepSeek model names so the context-window lookup succeeds.
+_openai_utils.ALL_AVAILABLE_MODELS.setdefault("deepseek-chat", 131072)
+_openai_utils.ALL_AVAILABLE_MODELS.setdefault("deepseek-reasoner", 131072)
+_openai_utils.CHAT_MODELS.setdefault("deepseek-chat", 131072)
+_openai_utils.CHAT_MODELS.setdefault("deepseek-reasoner", 131072)
 
 from src.config import settings
 

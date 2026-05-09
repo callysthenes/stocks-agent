@@ -9,11 +9,11 @@ from loguru import logger
 
 from src.config import settings
 
-_client: chromadb.HttpClient | None = None
+_client: "chromadb.HttpClient | None" = None
 _collection: Collection | None = None
 
 
-def get_chroma_client() -> chromadb.HttpClient:
+def get_chroma_client() -> "chromadb.HttpClient":
     """Get or create ChromaDB HTTP client (singleton)."""
     global _client
     if _client is None:

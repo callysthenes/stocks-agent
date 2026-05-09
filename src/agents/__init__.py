@@ -44,6 +44,7 @@ async def run_agent(
     query: str,
     send_telegram: bool = False,
     video_id: str | None = None,
+    ticker_symbols: list[str] | None = None,
 ) -> dict:
     """
     Run the full agent pipeline for a user query.
@@ -52,6 +53,7 @@ async def run_agent(
         query: User question or task in Spanish.
         send_telegram: Whether the User Agent should deliver via Telegram.
         video_id: Optional video ID if triggered by a video alert.
+        ticker_symbols: Pre-identified tickers from the DB (avoids regex guessing).
 
     Returns:
         Final agent state dict.
@@ -63,7 +65,7 @@ async def run_agent(
     initial_state: AgentState = {
         "messages": [HumanMessage(content=query)],
         "user_query": query,
-        "ticker_symbols": [],
+        "ticker_symbols": ticker_symbols if ticker_symbols is not None else [],
         "research_results": [],
         "analysis_results": {},
         "final_report": None,

@@ -40,7 +40,7 @@ services:
       - backend
 
   chromadb:
-    image: chromadb/chroma:0.5.23
+    image: chromadb/chroma:1.5.9
     restart: unless-stopped
     volumes:
       - chromadb_data:/chroma/chroma
@@ -51,7 +51,8 @@ services:
       ANONYMIZED_TELEMETRY: "FALSE"
       CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: ""
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "bash", "-c",
+             "(echo >/dev/tcp/localhost/8000) 2>/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -81,12 +82,12 @@ services:
     image: langfuse/langfuse:2
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
       SALT: ${LANGFUSE_SALT}
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:3001
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
       TELEMETRY_ENABLED: "false"
     depends_on:
@@ -96,10 +97,12 @@ services:
       - backend
       - frontend
 
-  # ── Ollama (Local LLM — GPU 1) ───────────────────────────────────────────────
+  # ── Ollama (Local LLM — GPU 1, future use) ─────────────────────────────────
+  # Start explicitly with: docker compose --profile gpu up -d ollama
 
   ollama:
     image: ollama/ollama:latest
+    profiles: [gpu]
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
@@ -122,9 +125,10 @@ services:
       context: .
       dockerfile: Dockerfile
       target: api
+    image: stocks_agent-api:latest
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8090:8000"
     env_file:
       - .env
     depends_on:
@@ -154,6 +158,11 @@ services:
       - .env
     environment:
       CUDA_VISIBLE_DEVICES: "0"
+      # Prevent transformers from spawning auto-conversion subprocesses
+      # (daemon Celery workers cannot create child processes).
+      # The model cache is fully populated, so offline mode is safe.
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -163,6 +172,7 @@ services:
         condition: service_healthy
     volumes:
       - media_data:/app/media
+      - model_cache:/app/.cache
     command: >
       celery -A src.celery_app worker
       --loglevel=info
@@ -173,17 +183,14 @@ services:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              device_ids: ["0"]
+            - driver: cdi
+              device_ids: ["nvidia.com/gpu=0"]
               capabilities: [gpu]
     networks:
       - backend
 
   beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: api
+    image: stocks_agent-api:latest
     restart: unless-stopped
     env_file:
       - .env
@@ -198,10 +205,7 @@ services:
       - backend
 
   telegram-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: api
+    image: stocks_agent-api:latest
     restart: unless-stopped
     env_file:
       - .env
@@ -216,9 +220,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
+    image: stocks_agent-dashboard:latest
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "8502:8501"
     env_file:
       - .env
     depends_on:
@@ -241,6 +246,7 @@ volumes:
   langfuse_db_data:
   ollama_data:
   media_data:
+  model_cache:
 
 networks:
   backend:

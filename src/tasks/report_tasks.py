@@ -36,7 +36,9 @@ def send_video_alert(self, video_id: str) -> dict:
                     return {"error": "Video not found"}
                 channel_name = video.channel.name if video.channel else "Unknown"
                 video_title = video.title
-                tickers = [m.ticker_symbol for m in video.ticker_mentions]
+                tickers = list(dict.fromkeys(  # deduplicated, order-preserving
+                    m.ticker_symbol for m in video.ticker_mentions
+                ))
 
             query = (
                 f"Analiza el vídeo reciente de {channel_name}: '{video_title}'. "
@@ -45,7 +47,8 @@ def send_video_alert(self, video_id: str) -> dict:
             )
 
             result = loop.run_until_complete(
-                run_agent(query=query, send_telegram=True, video_id=video_id)
+                run_agent(query=query, send_telegram=True, video_id=video_id,
+                          ticker_symbols=tickers)
             )
         finally:
             loop.close()

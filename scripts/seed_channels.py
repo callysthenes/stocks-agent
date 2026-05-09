@@ -14,8 +14,11 @@ load_dotenv()
 
 CHANNELS = [
     "https://www.youtube.com/@lamagiadelabolsa",
-    # Add more channels here:
-    # "https://www.youtube.com/@ChannelName",
+    "https://www.youtube.com/@EspeculacionenBolsa",
+    "https://www.youtube.com/@JoseLuisCavatv",
+    "https://www.youtube.com/@Bolsa_General",
+    "https://www.youtube.com/@oportunidadesenbolsa",
+    "https://www.youtube.com/@CapitalRadioB",
 ]
 
 

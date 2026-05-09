@@ -3,7 +3,7 @@ name = "stocks-agent"
 version = "0.1.0"
 description = "AI-powered stock analysis from Spanish YouTube investment channels"
 readme = "docs/README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "alembic>=1.14.0",
     "pymysql>=1.1.1",
+    "aiomysql>=0.2.0",
     "cryptography>=43.0.3",
     # Task queue
     "celery[redis]>=5.4.0",
@@ -88,7 +89,7 @@ packages = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src"]
 
 [tool.ruff.lint]
@@ -99,7 +100,7 @@ ignore = ["E501", "B008"]
 known-first-party = ["src"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 warn_return_any = false
 warn_unused_configs = true

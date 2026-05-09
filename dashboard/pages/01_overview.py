@@ -11,6 +11,10 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 st.set_page_config(page_title="Overview — StocksAgent", page_icon="📊", layout="wide")
+
+from dashboard.auth import require_login  # noqa: E402
+require_login()
+
 st.title("📊 Overview")
 
 try:
