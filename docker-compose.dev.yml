@@ -1,0 +1,39 @@
+services:
+  # Development overrides — mounts source code for hot-reload
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - media_data:/app/media
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+
+  worker:
+    volumes:
+      - ./src:/app/src
+      - media_data:/app/media
+    environment:
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+
+  beat:
+    volumes:
+      - ./src:/app/src
+
+  telegram-bot:
+    volumes:
+      - ./src:/app/src
+
+  dashboard:
+    volumes:
+      - ./src:/app/src
+      - ./dashboard:/app/dashboard
+    environment:
+      ENVIRONMENT: development

@@ -1,0 +1,91 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+
+# Mypy
+.mypy_cache/
+.dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.override.yml
+
+# Media / Downloads (temporary audio files)
+media/*.mp3
+media/*.wav
+media/*.webm
+media/*.m4a
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Model cache (large files)
+.cache/
+models/
+
+# Secrets
+*.pem
+*.key
+*.p12

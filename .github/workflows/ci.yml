@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dev dependencies
+        run: |
+          uv pip install --system ruff mypy \
+            types-redis types-python-dateutil
+      - name: Run ruff linter
+        run: ruff check src/ dashboard/ scripts/
+      - name: Run ruff formatter check
+        run: ruff format --check src/ dashboard/ scripts/
+      - name: Run mypy type check
+        run: mypy src/ --ignore-missing-imports
+        continue-on-error: true  # Soft fail until all types are complete
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      DEEPSEEK_API_KEY: sk-test
+      TELEGRAM_BOT_TOKEN: "0000000000:test"
+      MARIADB_PASSWORD: test
+      MARIADB_HOST: localhost
+      CHROMADB_HOST: localhost
+      ENVIRONMENT: test
+      EMBEDDING_DEVICE: cpu
+      WHISPER_DEVICE: cpu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies (CPU only, no GPU)
+        run: |
+          uv pip install --system \
+            fastapi uvicorn pydantic pydantic-settings \
+            sqlalchemy alembic pymysql cryptography \
+            celery redis \
+            yt-dlp youtube-transcript-api \
+            langchain langchain-openai langgraph langchain-community \
+            yfinance pandas-ta pandas numpy \
+            chromadb \
+            httpx loguru tenacity python-dateutil \
+            pytest pytest-asyncio pytest-cov pytest-mock \
+            youtube-transcript-api
+      - name: Run tests
+        run: pytest tests/ -v --cov=src --cov-report=xml -x
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+        continue-on-error: true
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: api
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build Dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,86 @@
+# CUDA 12.4 + cuDNN runtime base (matches RTX 3060, driver CUDA 13.0)
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    CUDA_VISIBLE_DEVICES=0
+
+# Install Python 3.11 and system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    python3.11-venv \
+    ffmpeg \
+    curl \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf python3.11 /usr/bin/python \
+    && ln -sf python3.11 /usr/bin/python3
+
+# Install uv
+RUN pip install uv==0.5.11
+
+WORKDIR /app
+
+# Install PyTorch with CUDA 12.4 support FIRST
+# (must precede sentence-transformers and faster-whisper)
+RUN pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Install CTranslate2 with CUDA (required by faster-whisper)
+RUN pip install ctranslate2>=4.4.0
+
+# Install GPU-specific ML libraries
+RUN pip install \
+    faster-whisper>=1.1.0 \
+    sentence-transformers>=3.3.1 \
+    tokenizers>=0.20.0
+
+# Install all other app dependencies (no GPU extras, torch already installed)
+COPY pyproject.toml .
+RUN uv pip install --system --no-cache \
+    "fastapi>=0.115.0" \
+    "uvicorn[standard]>=0.32.0" \
+    "pydantic>=2.9.0" \
+    "pydantic-settings>=2.6.0" \
+    "python-multipart>=0.0.12" \
+    "sqlalchemy>=2.0.36" \
+    "alembic>=1.14.0" \
+    "pymysql>=1.1.1" \
+    "cryptography>=43.0.3" \
+    "celery[redis]>=5.4.0" \
+    "redis>=5.2.1" \
+    "yt-dlp>=2024.11.4" \
+    "youtube-transcript-api>=0.6.3" \
+    "chromadb>=0.5.23" \
+    "llama-index-core>=0.12.0" \
+    "llama-index-vector-stores-chroma>=0.3.0" \
+    "llama-index-embeddings-huggingface>=0.4.0" \
+    "llama-index-llms-openai>=0.3.0" \
+    "langchain>=0.3.7" \
+    "langchain-openai>=0.2.10" \
+    "langgraph>=0.2.55" \
+    "langchain-community>=0.3.7" \
+    "yfinance>=0.2.50" \
+    "pandas-ta>=0.3.14b0" \
+    "pandas>=2.2.3" \
+    "numpy>=1.26.4" \
+    "langfuse>=2.0.0" \
+    "python-telegram-bot>=21.7" \
+    "httpx>=0.27.2" \
+    "aiofiles>=24.1.0" \
+    "loguru>=0.7.3" \
+    "tenacity>=9.0.0" \
+    "python-dateutil>=2.9.0" \
+    "pytz>=2024.2" \
+    "ujson>=5.10.0"
+
+COPY src/ ./src/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
+
+CMD ["celery", "-A", "src.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=default,gpu,io"]
