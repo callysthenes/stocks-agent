@@ -35,7 +35,7 @@ def get_langfuse_callback():
     if not settings.langfuse_secret_key or not settings.langfuse_public_key:
         return None
     try:
-        from langfuse.callback import CallbackHandler
+        from langfuse.langchain import CallbackHandler
         handler = CallbackHandler(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
