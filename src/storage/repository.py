@@ -313,6 +313,7 @@ def save_ground_truth(
     actual_change_pct: float,
     actual_direction: str,
     is_accurate: bool,
+    notes: str | None = None,
 ) -> GroundTruth:
     gt = GroundTruth(
         prediction_id=prediction_id,
@@ -321,6 +322,7 @@ def save_ground_truth(
         actual_direction=actual_direction,
         is_accurate=is_accurate,
         evaluation_date=date.today().isoformat(),
+        notes=notes,
     )
     db.add(gt)
     db.execute(

@@ -1,5 +1,5 @@
 """
-Celery analysis tasks — ground truth evaluation, accuracy calculation.
+Celery analysis tasks — ground truth evaluation, accuracy calculation, Kimball backfill.
 Runs on the default queue (no GPU required).
 
 Price-lookup strategy
@@ -13,10 +13,10 @@ from datetime import date, datetime, timedelta
 
 import yfinance as yf
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from src.celery_app import celery_app
-from src.models import GroundTruth, Prediction
+from src.models import GroundTruth, Prediction, Transcript
 from src.storage import repository
 from src.storage.mariadb_client import get_sync_db
 
@@ -181,3 +181,129 @@ def evaluate_pending_predictions(self) -> dict:
         f"{skipped} skipped, {errors} errors (total pending={len(pending)})"
     )
     return {"evaluated": evaluated, "skipped": skipped, "errors": errors}
+
+
+# ── Kimball backfill ──────────────────────────────────────────────────────────
+
+@celery_app.task(
+    name="src.tasks.analysis_tasks.backfill_kimball_fields",
+    bind=True,
+    queue="default",
+    time_limit=7200,  # 2 h max (many LLM calls)
+)
+def backfill_kimball_fields(self) -> dict:
+    """
+    One-off task: for each video that has predictions missing Kimball fields
+    (recommendation, confidence_score, analyst_reasoning), re-run the LLM
+    extraction and patch the existing prediction rows in-place.
+
+    Matching strategy: video_id × ticker_symbol (first incomplete match wins).
+    Predictions already having all three fields are skipped.
+    """
+    from src.ingestion.metadata_extractor import MetadataExtractor
+
+    logger.info("Starting Kimball fields backfill")
+    extractor = MetadataExtractor()
+
+    # ── 1. Find video_ids that have incomplete predictions ────────────────────
+    with get_sync_db() as db:
+        rows = db.execute(
+            select(Prediction.video_id)
+            .where(
+                Prediction.recommendation.is_(None),
+                Prediction.analyst_reasoning.is_(None),
+                Prediction.confidence_score.is_(None),
+            )
+            .distinct()
+        ).scalars().all()
+    video_ids = list(rows)
+    logger.info(f"Found {len(video_ids)} videos with incomplete predictions")
+
+    updated_total = 0
+    skipped_total = 0
+    error_total = 0
+
+    for video_id in video_ids:
+        try:
+            # ── 2. Fetch transcript ───────────────────────────────────────────
+            with get_sync_db() as db:
+                transcript = db.scalar(
+                    select(Transcript).where(Transcript.video_id == video_id)
+                )
+                if not transcript or not (transcript.cleaned_text or transcript.raw_text):
+                    logger.warning(f"[backfill] No transcript for video {video_id}")
+                    skipped_total += 1
+                    continue
+                text = transcript.cleaned_text or transcript.raw_text
+
+            # ── 3. Re-run extraction ──────────────────────────────────────────
+            ticker_dicts = extractor.extract_tickers(text)
+            if not ticker_dicts:
+                logger.info(f"[backfill] No tickers extracted for video {video_id}")
+                skipped_total += 1
+                continue
+
+            pred_dicts = extractor.extract_predictions(text, ticker_dicts)
+            if not pred_dicts:
+                logger.info(f"[backfill] No predictions extracted for video {video_id}")
+                skipped_total += 1
+                continue
+
+            # ── 4. Patch matching predictions ─────────────────────────────────
+            # Index extracted predictions by ticker_symbol (last one wins if dup)
+            extracted_by_ticker: dict[str, dict] = {}
+            for pd in pred_dicts:
+                sym = pd.get("ticker_symbol", "").upper().strip()
+                if sym:
+                    extracted_by_ticker[sym] = pd
+
+            with get_sync_db() as db:
+                # Fetch existing incomplete predictions for this video
+                incomplete = db.scalars(
+                    select(Prediction).where(
+                        Prediction.video_id == video_id,
+                        Prediction.recommendation.is_(None),
+                        Prediction.analyst_reasoning.is_(None),
+                        Prediction.confidence_score.is_(None),
+                    )
+                ).all()
+
+                video_updated = 0
+                for pred in incomplete:
+                    extracted = extracted_by_ticker.get(pred.ticker_symbol.upper())
+                    if not extracted:
+                        continue
+
+                    rec = extracted.get("recommendation")
+                    if rec not in ("buy", "accumulate", "hold", "reduce", "sell", "avoid"):
+                        rec = None
+
+                    db.execute(
+                        update(Prediction)
+                        .where(Prediction.id == pred.id)
+                        .values(
+                            recommendation=rec,
+                            confidence_score=extracted.get("confidence_score"),
+                            analyst_reasoning=extracted.get("analyst_reasoning"),
+                            is_long_term=extracted.get("is_long_term"),
+                            entry_price=extracted.get("entry_price") or pred.entry_price,
+                            stop_loss=extracted.get("stop_loss") or pred.stop_loss,
+                            target_price=extracted.get("target_price") or pred.target_price,
+                        )
+                    )
+                    video_updated += 1
+
+                updated_total += video_updated
+                logger.info(
+                    f"[backfill] video {video_id}: patched {video_updated}/{len(incomplete)} predictions"
+                )
+
+        except Exception as exc:
+            logger.error(f"[backfill] Error on video {video_id}: {exc}", exc_info=True)
+            error_total += 1
+
+    logger.info(
+        f"Kimball backfill complete: {updated_total} predictions updated, "
+        f"{skipped_total} videos skipped, {error_total} errors"
+    )
+    return {"updated": updated_total, "skipped": skipped_total, "errors": error_total}
