@@ -22,6 +22,7 @@ try:
     from src.storage.mariadb_client import get_sync_db
     from src.models import Channel, ChannelAccuracy, Prediction, GroundTruth
     from sqlalchemy import select, desc
+    from sqlalchemy.orm import selectinload
 
     with get_sync_db() as db:
         accuracy_rows = db.scalars(
@@ -68,7 +69,7 @@ try:
             return "background-color: #fadbd8"
 
     st.dataframe(
-        df.style.applymap(color_accuracy, subset=["Precisión %"]),
+        df.style.map(color_accuracy, subset=["Precisión %"]),
         use_container_width=True,
         hide_index=True,
     )
@@ -117,27 +118,32 @@ try:
 
     if channel_id:
         with get_sync_db() as db:
-            channel_preds = db.scalars(
-                select(Prediction)
-                .where(Prediction.channel_id == channel_id, Prediction.is_evaluated == True)  # noqa: E712
-                .order_by(desc(Prediction.prediction_date))
-                .limit(50)
-            ).all()
-
-        if channel_preds:
-            pred_rows = []
-            for p in channel_preds:
-                gt = p.ground_truth
-                pred_rows.append({
+            channel_preds = [
+                {
                     "Ticker": p.ticker_symbol,
-                    "Tipo": p.prediction_type,
-                    "Dirección": p.predicted_direction,
+                    "Tipo": str(p.prediction_type),
+                    "Dirección": str(p.predicted_direction),
                     "Fecha": p.prediction_date,
                     "Precio Inicio": float(p.price_at_prediction) if p.price_at_prediction else None,
-                    "Correcta": "✅" if gt.is_accurate else "❌" if gt else "—",
-                    "Cambio Real %": float(gt.actual_change_pct) if gt and gt.actual_change_pct else None,
-                })
-            st.dataframe(pd.DataFrame(pred_rows), use_container_width=True, hide_index=True)
+                    "Correcta": "✅" if (p.ground_truth and p.ground_truth.is_accurate) else (
+                        "❌" if p.ground_truth else "—"),
+                    "Cambio Real %": float(p.ground_truth.actual_change_pct)
+                        if p.ground_truth and p.ground_truth.actual_change_pct else None,
+                }
+                for p in db.scalars(
+                    select(Prediction)
+                    .options(selectinload(Prediction.ground_truth))
+                    .where(
+                        Prediction.channel_id == channel_id,
+                        Prediction.is_evaluated == True,  # noqa: E712
+                    )
+                    .order_by(desc(Prediction.prediction_date))
+                    .limit(50)
+                ).all()
+            ]
+
+        if channel_preds:
+            st.dataframe(pd.DataFrame(channel_preds), use_container_width=True, hide_index=True)
         else:
             st.info("No hay predicciones evaluadas para este canal.")
 

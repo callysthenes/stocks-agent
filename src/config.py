@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-chat"
 
+    # ── Z.AI / ZhipuAI GLM (fallback LLM) ────────────────────────────────────
+    zhipuai_api_key: str = Field(default="", description="Z.AI / ZhipuAI API key (fallback LLM)")
+    zhipuai_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
+    zhipuai_model: str = "glm-4-flash"  # free-tier fast model; upgrade to glm-4-plus for quality
+
     # ── Telegram ──────────────────────────────────────────────────────────────
     telegram_bot_token: str = Field(..., description="Telegram bot token")
     telegram_chat_id: str = Field(default="", description="Default chat ID for reports")

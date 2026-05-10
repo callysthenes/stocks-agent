@@ -13,6 +13,7 @@ celery_app = Celery(
         "src.tasks.ingestion_tasks",
         "src.tasks.analysis_tasks",
         "src.tasks.report_tasks",
+        "src.tasks.discovery_tasks",
     ],
 )
 
@@ -38,6 +39,7 @@ celery_app.conf.update(
         "src.tasks.fetch_tasks.*": {"queue": "io"},
         "src.tasks.report_tasks.*": {"queue": "default"},
         "src.tasks.analysis_tasks.*": {"queue": "default"},
+        "src.tasks.discovery_tasks.*": {"queue": "default"},
     },
     # Retry defaults
     task_default_retry_delay=60,
@@ -65,6 +67,17 @@ celery_app.conf.update(
                 hour=settings.daily_report_hour_utc,
                 minute=settings.daily_report_minute_utc,
             ),
+            "options": {"queue": "default"},
+        },
+        # ── Weekly discovery tasks ─────────────────────────────────────────
+        "discover-new-channels": {
+            "task": "src.tasks.discovery_tasks.discover_new_channels",
+            "schedule": crontab(day_of_week="monday", hour=9, minute=0),
+            "options": {"queue": "default"},
+        },
+        "propose-schema-updates": {
+            "task": "src.tasks.discovery_tasks.propose_schema_updates",
+            "schedule": crontab(day_of_week="sunday", hour=20, minute=0),
             "options": {"queue": "default"},
         },
     },
