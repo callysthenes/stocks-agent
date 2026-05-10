@@ -136,6 +136,8 @@ services:
       # Offline mode is safe once the worker has populated the cache.
       TRANSFORMERS_OFFLINE: "1"
       HF_HUB_OFFLINE: "1"
+      # API container has no GPU — run embeddings on CPU (fast enough for queries)
+      EMBEDDING_DEVICE: "cpu"
     depends_on:
       mariadb:
         condition: service_healthy

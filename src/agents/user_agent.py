@@ -36,6 +36,7 @@ def user_agent_node(state: AgentState) -> Command:
     analysis_results = state.get("analysis_results", {})
     research_results = state.get("research_results", [])
     tickers = state.get("ticker_symbols", [])
+    video_id = state.get("video_id")  # set only for automated video-alert runs
 
     # Compile all available content
     content_parts = []
@@ -54,18 +55,39 @@ def user_agent_node(state: AgentState) -> Command:
 
     full_content = "\n\n".join(content_parts) if content_parts else "No se encontró información suficiente."
 
-    # ── Format the final report ───────────────────────────────────────────────
+    # ── Choose format based on context ───────────────────────────────────────
     dashboard_url = settings.dashboard_url
     tickers_str = ", ".join(tickers) if tickers else "N/A"
 
-    format_prompt = f"""Formatea el siguiente análisis para entregarlo al usuario vía Telegram.
-El mensaje debe ser claro, profesional y conciso.
-Incluye al final: {dashboard_url}
-Tickers analizados: {tickers_str}
-Consulta original: {query}
+    if video_id:
+        # Automated video-alert: use the structured video-report format
+        format_instruction = (
+            "Usa el formato de alerta de vídeo:\n"
+            "📹 *Nuevo Vídeo Analizado*\nCanal: ...\nVídeo: ...\nTickers: ...\n[resumen]\n"
+            f"🔗 {dashboard_url}"
+        )
+    elif tickers:
+        # Ticker analysis: structured financial report
+        format_instruction = (
+            f"Usa el formato de análisis de ticker para {tickers_str}. "
+            "Incluye análisis técnico, fundamental, y qué dicen los canales. "
+            f"Termina con el link {dashboard_url} y el disclaimer."
+        )
+    else:
+        # Conversational / general query — plain answer, no video/ticker template
+        format_instruction = (
+            "El usuario hizo una consulta general (no hay ticker específico). "
+            "Responde directamente a la pregunta de forma conversacional, clara y concisa. "
+            "No uses plantillas de informes de vídeo ni de ticker. "
+            f"Puedes mencionar el dashboard al final: {dashboard_url}"
+        )
 
-Contenido a formatear:
-{full_content[:6000]}"""
+    format_prompt = (
+        f"Consulta del usuario: {query}\n"
+        f"Tickers analizados: {tickers_str}\n\n"
+        f"Instrucción de formato: {format_instruction}\n\n"
+        f"Contenido a formatear:\n{full_content[:6000]}"
+    )
 
     messages = [
         {"role": "system", "content": USER_AGENT_SYSTEM},

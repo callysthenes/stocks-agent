@@ -9,7 +9,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-API_BASE = "http://api:8090"
+API_BASE = "http://api:8000"
 AGENT_ENDPOINT = f"{API_BASE}/api/v1/agent/query"
 TIMEOUT = 120  # seconds — agent can take a while
 

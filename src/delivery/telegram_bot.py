@@ -157,6 +157,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(query) < 3:
         return
 
+    # ── Short-circuit trivial / greeting messages ────────────────────────────
+    _GREETINGS = {"hola", "hello", "hi", "hey", "buenas", "buenos días",
+                  "buenos dias", "buenas tardes", "buenas noches", "ola", "oi"}
+    if query.lower() in _GREETINGS or len(query) <= 10 and not any(
+        c.isupper() or c in ".-/" for c in query
+    ):
+        await update.message.reply_text(
+            "¡Hola! Soy StocksAgent 🤖\n\n"
+            "Puedo ayudarte con:\n"
+            "• `/analyze SAN.MC` — Análisis completo de un ticker\n"
+            "• `/accuracy` — Precisión de predicciones por canal\n"
+            "• `/report` — Último informe generado\n"
+            "• `/status` — Estado del sistema\n\n"
+            "O escríbeme directamente tu pregunta sobre una acción, por ejemplo:\n"
+            "_¿Qué dicen los canales sobre Santander?_\n"
+            "_Analiza técnicamente NVDA_",
+            parse_mode="Markdown",
+        )
+        return
+
     await update.message.reply_text("Procesando tu consulta... ⏳")
 
     try:

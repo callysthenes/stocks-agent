@@ -36,11 +36,9 @@ def get_langfuse_callback():
         return None
     try:
         from langfuse.langchain import CallbackHandler
-        handler = CallbackHandler(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
-        )
+        # Langfuse ≥ 3: credentials come from env vars (LANGFUSE_PUBLIC_KEY,
+        # LANGFUSE_SECRET_KEY, LANGFUSE_HOST) — constructor only takes public_key.
+        handler = CallbackHandler(public_key=settings.langfuse_public_key)
         return handler
     except Exception as e:
         logger.debug(f"Could not create Langfuse callback handler: {e}")
